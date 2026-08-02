@@ -46,6 +46,12 @@
     overflow-y:auto;
   }
   .brand{ padding:0 24px 24px; border-bottom:1px solid var(--line); margin-bottom:18px; }
+  .brand-back{
+    display:inline-block; font-family:var(--mono); font-size:11px;
+    color:var(--ink-dim); text-decoration:none; letter-spacing:.08em;
+    margin-bottom:14px; transition:color .15s ease;
+  }
+  .brand-back:hover{ color:var(--amber-bright); }
   .brand-eyebrow{
     font-family:var(--mono); font-size:10px; letter-spacing:.28em;
     color:var(--amber); text-transform:uppercase; margin-bottom:10px;

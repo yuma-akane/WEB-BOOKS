@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>檔案室 ｜ 選擇專案</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #0b0d10;
+    --surface: #14171b;
+    --surface-2: #1a1e23;
+    --ink: #e6e8ea;
+    --ink-dim: #7c848c;
+    --amber: #c98a3a;
+    --amber-bright: #e3a94f;
+    --line: rgba(230,232,234,0.10);
+    --sans: 'Noto Sans TC', -apple-system, sans-serif;
+    --mono: 'JetBrains Mono', monospace;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:
+      linear-gradient(180deg, rgba(201,138,58,0.05), transparent 320px),
+      var(--bg);
+    color:var(--ink);
+    font-family:var(--sans);
+    min-height:100vh;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    padding:80px 24px;
+    -webkit-font-smoothing:antialiased;
+  }
+  .eyebrow{
+    font-family:var(--mono); font-size:11px; letter-spacing:.3em;
+    color:var(--amber); text-transform:uppercase; margin-bottom:16px;
+  }
+  h1{
+    font-size:38px; font-weight:800; letter-spacing:.03em;
+    margin:0 0 12px;
+  }
+  .sub{
+    font-family:var(--mono); font-size:12px; color:var(--ink-dim);
+    letter-spacing:.06em; margin-bottom:56px; text-align:center;
+  }
+  .grid{
+    display:grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap:18px;
+    width:100%;
+    max-width:900px;
+  }
+  .card{
+    background:var(--surface);
+    border:1px solid var(--line);
+    border-left:3px solid var(--amber);
+    padding:26px 22px;
+    text-align:left;
+    color:var(--ink);
+    text-decoration:none;
+    cursor:pointer;
+    transition:transform .15s ease, border-color .15s ease, background .15s ease;
+    display:block;
+  }
+  .card:hover{
+    transform:translateY(-2px);
+    background:var(--surface-2);
+    border-left-color:var(--amber-bright);
+  }
+  .card-tag{
+    font-family:var(--mono); font-size:10px; letter-spacing:.2em;
+    color:var(--amber); text-transform:uppercase; margin-bottom:10px;
+  }
+  .card-title{
+    font-size:20px; font-weight:700; letter-spacing:.02em;
+  }
+  .state{
+    font-family:var(--mono); font-size:12px; color:var(--ink-dim);
+    margin-top:40px; text-align:center; line-height:1.8;
+  }
+  .state .sync-dot{
+    display:inline-block; width:6px; height:6px; border-radius:50%;
+    margin-right:6px; background:#5c8a5c; box-shadow:0 0 6px #5c8a5c;
+  }
+  .state .sync-dot.offline{ background:var(--amber); box-shadow:0 0 6px var(--amber); }
+</style>
+</head>
+<body>
+  <div class="eyebrow">Classified Archive</div>
+  <h1>檔案室</h1>
+  <div class="sub">選擇要查看的專案</div>
+
+  <div class="grid" id="grid"></div>
+  <div class="state" id="state">
+    <span class="sync-dot offline"></span>正在讀取專案清單…
+  </div>
+
+<script>
+/* ============================================================
+   設定：貼上部署好的 Google Apps Script 網頁應用程式網址
+   （結尾通常是 /exec）。這個頁面會呼叫
+   API_URL + '?action=list' 拿到所有專案的清單。
+   ============================================================ */
+const CONFIG = {
+  API_URL: 'https://script.google.com/macros/s/AKfycbxSmsCzjYfupNutwQsLvPwsBnVVogNRV9eKB9EtCmiajb7L_LOuy6r0uv1H8FmytPIPzg/exec'
+};
+
+// 離線備援：抓不到清單時，至少讓這幾個按鈕能用
+const FALLBACK_PROJECTS = [
+  { key: 'jungle', name: '叢林' },
+  { key: 'night-owl', name: '夜梟部隊' }
+];
+
+function renderProjects(list){
+  const grid = document.getElementById('grid');
+  grid.innerHTML = '';
+  list.forEach(p => {
+    const a = document.createElement('a');
+    a.className = 'card';
+    a.href = 'index.html?project=' + encodeURIComponent(p.key);
+    a.innerHTML =
+      '<div class="card-tag">Project · ' + escapeHtml(p.key) + '</div>' +
+      '<div class="card-title">' + escapeHtml(p.name) + '</div>';
+    grid.appendChild(a);
+  });
+}
+
+function escapeHtml(str){
+  return String(str).replace(/[&<>"']/g, c => ({
+    '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'
+  }[c]));
+}
+
+function setState(online, msg){
+  const state = document.getElementById('state');
+  const dotClass = online ? 'sync-dot' : 'sync-dot offline';
+  state.innerHTML = '<span class="' + dotClass + '"></span>' + msg;
+}
+
+async function loadProjects(){
+  renderProjects(FALLBACK_PROJECTS);
+  setState(false, '離線清單（尚未連接 Google 文件）');
+
+  if (!CONFIG.API_URL) return;
+
+  try{
+    const res = await fetch(CONFIG.API_URL + '?action=list', { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const json = await res.json();
+    if (json && json.projects && json.projects.length){
+      renderProjects(json.projects);
+      setState(true, '已連接 Google 文件 · ' + new Date().toLocaleString('zh-TW'));
+    }
+  } catch(err){
+    console.error('讀取專案清單失敗：', err);
+    setState(false, '離線清單（連線失敗，請檢查 API_URL 或部署設定）');
+  }
+}
+
+loadProjects();
+</script>
+</body>
+</html>
