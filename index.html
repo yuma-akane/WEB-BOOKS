@@ -3,9 +3,283 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>夜梟部隊 ｜ Night Owl Unit</title>
+<title>檔案室 ｜ 讀取中…</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="night-owl-unit-styles.css">
 </head>
 <body>
-Hi
+
+<!-- 讀取畫面：資料回來之前一直顯示這個，避免顯示過期/離線內容 -->
+<div class="loading-screen" id="loadingScreen">
+  <div class="loading-spinner"></div>
+  <div class="loading-text" id="loadingText">正在連接 Google 文件…</div>
+</div>
+
+<!-- 錯誤畫面：project 參數錯誤或連線失敗時顯示 -->
+<div class="error-screen" id="errorScreen" style="display:none;">
+  <div class="error-eyebrow">Connection Failed</div>
+  <div class="error-title" id="errorTitle">讀取失敗</div>
+  <div class="error-msg" id="errorMsg"></div>
+  <a href="home.html" class="error-back">← 回首頁</a>
+</div>
+
+<button class="menu-toggle" id="menuToggle" style="display:none;">☰ &nbsp; 檔案索引</button>
+
+<div class="layout" id="layout" style="display:none;">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <a href="home.html" class="brand-back" title="回首頁">← 回首頁</a>
+      <div class="brand-eyebrow">Classified Archive</div>
+      <div class="brand-title" id="brandTitle"></div>
+      <div class="brand-sub" id="brandSub">檔案索引</div>
+    </div>
+    <div class="nav-search">
+      <input type="text" id="navSearch" placeholder="搜尋分頁 / 人物…" />
+    </div>
+    <ul class="nav-tree" id="navTree"></ul>
+    <div class="sync-note" id="syncNote"></div>
+  </aside>
+
+  <main class="main">
+    <div class="plaque">
+      <div class="plaque-eyebrow">
+        <span id="plaqueEyebrow">分頁 · TAB</span>
+        <span class="stamp">FILE</span>
+      </div>
+      <div class="plaque-title" id="plaqueTitle">—</div>
+      <div class="plaque-path" id="plaquePath"></div>
+    </div>
+    <div class="content" id="content"></div>
+  </main>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+<script>
+/* ============================================================
+   設定：貼上部署好的 Google Apps Script 網頁應用程式網址
+   （結尾通常是 /exec）
+   ============================================================ */
+const CONFIG = {
+  API_URL: 'https://script.google.com/macros/s/AKfycbxSmsCzjYfupNutwQsLvPwsBnVVogNRV9eKB9EtCmiajb7L_LOuy6r0uv1H8FmytPIPzg/exec'
+};
+
+// 必須從網址帶入 ?project=xxx，決定要抓哪一份文件
+// 例如 index.html?project=jungle
+const PROJECT_KEY = new URLSearchParams(window.location.search).get('project');
+
+let DATA = null;
+let activeTabId = null;
+let collapsedSet = new Set();
+
+function escapeHtml(str){
+  return String(str).replace(/[&<>"']/g, c => ({
+    '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'
+  }[c]));
+}
+
+function showError(title, msg){
+  $('#loadingScreen').hide();
+  $('#errorTitle').text(title);
+  $('#errorMsg').text(msg);
+  $('#errorScreen').show();
+}
+
+function buildTree(tabs){
+  const byId = {};
+  tabs.forEach(t => byId[t.id] = $.extend({}, t, { children: [] }));
+  const roots = [];
+  tabs.forEach(t => {
+    if (t.parentId && byId[t.parentId]) byId[t.parentId].children.push(byId[t.id]);
+    else roots.push(byId[t.id]);
+  });
+  return roots;
+}
+
+function renderNav(filter){
+  const $navTree = $('#navTree').empty();
+  const q = (filter || '').trim().toLowerCase();
+  const tree = buildTree(DATA.tabs);
+
+  function matches(node){
+    if (node.title.toLowerCase().includes(q)) return true;
+    return node.children.some(matches);
+  }
+
+  function renderNode(node, indexPath){
+    if (q && !matches(node)) return null;
+
+    const hasChildren = node.children.length > 0;
+    const isCollapsed = collapsedSet.has(node.id);
+
+    const $li = $('<li class="nav-node"></li>');
+    const $row = $('<div class="nav-row"></div>');
+
+    const $toggle = $('<button class="nav-toggle" aria-label="展開/收合">▾</button>');
+    if (!hasChildren) $toggle.addClass('spacer');
+    if (isCollapsed) $toggle.addClass('collapsed');
+    if (hasChildren){
+      $toggle.on('click', function(e){
+        e.stopPropagation();
+        if (collapsedSet.has(node.id)) collapsedSet.delete(node.id);
+        else collapsedSet.add(node.id);
+        renderNav($('#navSearch').val());
+      });
+    }
+    $row.append($toggle);
+
+    const $btn = $('<button class="nav-item"></button>');
+    if (node.id === activeTabId) $btn.addClass('active');
+    $btn.html(
+      '<span class="nav-tag">' + indexPath + '</span>' +
+      '<span class="nav-item-label">' + escapeHtml(node.title) + '</span>'
+    );
+    $btn.on('click', function(){ selectTab(node.id); });
+    $row.append($btn);
+
+    $li.append($row);
+
+    if (hasChildren){
+      const $childUl = $('<ul class="nav-children"></ul>');
+      if (isCollapsed) $childUl.addClass('hidden');
+      node.children.forEach((child, i) => {
+        const $childLi = renderNode(child, indexPath + '.' + (i + 1));
+        if ($childLi) $childUl.append($childLi);
+      });
+      $li.append($childUl);
+    }
+    return $li;
+  }
+
+  tree.forEach((node, i) => {
+    const $li = renderNode(node, String(i + 1));
+    if ($li) $navTree.append($li);
+  });
+}
+
+function getPathLabel(id){
+  const parts = [];
+  let current = DATA.tabs.find(t => t.id === id);
+  while (current){
+    parts.unshift(current.title);
+    current = current.parentId ? DATA.tabs.find(t => t.id === current.parentId) : null;
+  }
+  return parts.join(' ／ ');
+}
+
+function renderRuns(block){
+  const $frag = $(document.createDocumentFragment());
+  if (block.runs && block.runs.length){
+    block.runs.forEach(r => {
+      let $node = $(document.createTextNode(r.text));
+      if (r.bold){ $node = $('<strong></strong>').append($node); }
+      if (r.italic){ $node = $('<em></em>').append($node); }
+      $frag.append($node);
+    });
+  } else {
+    $frag.append(document.createTextNode(block.text || ''));
+  }
+  return $frag;
+}
+
+function renderBlock(block){
+  if (block.type === 'image'){
+    return $('<img>').attr('src', block.src).attr('alt', '');
+  }
+  if (block.type === 'table' && block.rows){
+    const $table = $('<table></table>');
+    block.rows.forEach(row => {
+      const $tr = $('<tr></tr>');
+      row.forEach(cell => {
+        $tr.append($('<td></td>').text(cell));
+      });
+      $table.append($tr);
+    });
+    return $table;
+  }
+  if (block.type === 'li'){
+    const $ul = $('<ul></ul>');
+    const $li = $('<li></li>').append(renderRuns(block));
+    $ul.append($li);
+    return $ul;
+  }
+  const tag = ['h1','h2','h3','h4'].includes(block.type) ? block.type : 'p';
+  return $('<' + tag + '></' + tag + '>').append(renderRuns(block));
+}
+
+function selectTab(id){
+  activeTabId = id;
+  const tab = DATA.tabs.find(t => t.id === id);
+  if (!tab) return;
+
+  $('#plaqueEyebrow').text('分頁 · TAB · LEVEL ' + (tab.level || 0));
+  $('#plaqueTitle').text(tab.title);
+  $('#plaquePath').text(getPathLabel(id));
+
+  const $content = $('#content').empty();
+  if (!tab.blocks || tab.blocks.length === 0){
+    $content.append($('<div class="empty-state"></div>').text('（此分頁目前沒有文字內容）'));
+  } else {
+    tab.blocks.forEach(block => $content.append(renderBlock(block)));
+  }
+
+  renderNav($('#navSearch').val());
+  $('#sidebar').removeClass('open');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function showApp(){
+  $('#loadingScreen').hide();
+  $('#layout').css('display', 'grid');
+  $('#menuToggle').css('display', '');
+}
+
+function loadData(){
+  if (!PROJECT_KEY){
+    showError('缺少專案代號', '網址需要帶 ?project=xxx 才知道要顯示哪份文件，請從首頁進入。');
+    return;
+  }
+  if (!CONFIG.API_URL){
+    showError('尚未設定 API_URL', '請在程式碼裡的 CONFIG.API_URL 貼上部署好的 Apps Script 網址。');
+    return;
+  }
+
+  $.ajax({
+    url: CONFIG.API_URL,
+    data: { project: PROJECT_KEY },
+    dataType: 'json',
+    cache: false
+  }).done(function(json){
+    if (json && json.error){
+      showError('讀取失敗', json.error);
+      return;
+    }
+    if (!json || !json.tabs || !json.tabs.length){
+      showError('沒有內容', '這份文件目前沒有任何分頁內容。');
+      return;
+    }
+
+    DATA = json;
+    document.title = (json.title || '檔案室') + ' ｜ Archive';
+    $('#brandTitle').text(json.title || '');
+    $('#syncNote').html(
+      '<span class="sync-dot"></span>已連接 Google 文件 · ' + new Date().toLocaleString('zh-TW')
+    );
+
+    renderNav('');
+    selectTab(DATA.tabs[0].id);
+    showApp();
+  }).fail(function(jqXHR, textStatus){
+    showError('連線失敗', '無法連上 Google 文件（' + textStatus + '）。請確認 Apps Script 已部署、存取權限設為「所有人」。');
+  });
+}
+
+$(function(){
+  $('#navSearch').on('input', function(){ renderNav($(this).val()); });
+  $('#menuToggle').on('click', function(){ $('#sidebar').toggleClass('open'); });
+  loadData();
+});
+</script>
 </body>
 </html>
